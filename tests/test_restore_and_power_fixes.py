@@ -13,6 +13,7 @@ from pytest_homeassistant_custom_component.common import mock_restore_cache, moc
 
 from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN, SensorDeviceClass
 from homeassistant.components.input_boolean import DOMAIN as INPUT_BOOLEAN_DOMAIN
+from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.core import State
 
 from .commons import *  # pylint: disable=wildcard-import, unused-wildcard-import
@@ -117,6 +118,58 @@ async def test_power_entity_id_used_when_cannot_change_power(
     device._power_entity_id = "input_number.does_not_exist"
     device.set_current_power_with_device_state()
     assert device.current_power == 585
+
+
+async def test_fixed_device_uses_measured_power_for_current_consumption(
+    hass: HomeAssistant, init_solar_optimizer_central_config
+):
+    """A fixed device uses a real power sensor instead of power_max when active."""
+
+    data = {
+        **DEVICE_A_DATA,
+        CONF_NAME: "Water heater",
+        CONF_MEASURED_POWER_ENTITY_ID: "sensor.fake_water_heater_power",
+    }
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Water heater",
+        unique_id="waterHeaterMeasured",
+        data=data,
+    )
+    device = await create_managed_device(hass, entry, "water_heater")
+    assert device is not None
+
+    await create_test_input_boolean(hass, device.entity_id, "fake water heater")
+    fake_switch = search_entity(hass, "input_boolean.fake_device_a", INPUT_BOOLEAN_DOMAIN)
+
+    hass.states.async_set(
+        "sensor.fake_water_heater_power",
+        "0",
+        {"device_class": "power", "unit_of_measurement": "W"},
+    )
+    device.set_current_power_with_device_state()
+    assert device.current_power == 0
+
+    await fake_switch.async_turn_on()
+    await hass.async_block_till_done()
+    device.set_current_power_with_device_state()
+    assert device.current_power == 0
+
+    hass.states.async_set(
+        "sensor.fake_water_heater_power",
+        "1.2",
+        {"device_class": "power", "unit_of_measurement": "kW"},
+    )
+    device.set_current_power_with_device_state()
+    assert device.current_power == 1200
+
+    hass.states.async_set(
+        "sensor.fake_water_heater_power",
+        STATE_UNAVAILABLE,
+        {"device_class": "power", "unit_of_measurement": "W"},
+    )
+    device.set_current_power_with_device_state()
+    assert device.current_power == 1000
 
 
 async def test_power_entity_id_fallback_when_not_configured(

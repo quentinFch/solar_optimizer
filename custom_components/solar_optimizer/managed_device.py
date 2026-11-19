@@ -7,6 +7,7 @@ from homeassistant.core import HomeAssistant, Context
 from homeassistant.helpers.template import Template
 from homeassistant.components.select import SelectEntity
 from homeassistant.const import STATE_ON, STATE_UNAVAILABLE, STATE_UNKNOWN
+from homeassistant.util.unit_conversion import PowerConverter
 
 from homeassistant.components.light import DOMAIN as LIGHT_DOMAIN
 from homeassistant.components.fan import DOMAIN as FAN_DOMAIN
@@ -158,7 +159,6 @@ class ManagedDevice:
         self._unique_id = name_to_unique_id(self._name)
         self._entity_id = device_config.get("entity_id")
         self._power_entity_id = device_config.get("power_entity_id")
-        # Display-only: real consumption sensor shown in the card, never used by the algorithm
         self._measured_power_entity_id = device_config.get("measured_power_entity_id")
         self._power_max = convert_to_template_or_value(hass, device_config.get("power_max"))
         self._offpeak_power = convert_to_template_or_value(hass, device_config.get(CONF_OFFPEAK_POWER))
@@ -452,6 +452,37 @@ class ManagedDevice:
             self._current_power = 0
             _LOGGER.debug(
                 "Set current_power to 0 for device %s cause not active", self._name
+            )
+            return
+
+        if not self._can_change_power and self._measured_power_entity_id:
+            state = self._hass.states.get(self._measured_power_entity_id)
+            if state and state.state not in [None, STATE_UNKNOWN, STATE_UNAVAILABLE]:
+                try:
+                    measured_power = float(state.state)
+                    unit = state.attributes.get("unit_of_measurement")
+                    if unit:
+                        measured_power = PowerConverter.convert(measured_power, unit, "W")
+                    if math.isfinite(measured_power) and measured_power >= 0:
+                        self._current_power = round(measured_power)
+                        _LOGGER.debug(
+                            "Set current_power to %s W for fixed device %s from measured sensor %s",
+                            self._current_power,
+                            self._name,
+                            self._measured_power_entity_id,
+                        )
+                        return
+                except (TypeError, ValueError) as err:
+                    _LOGGER.warning(
+                        "Invalid measured power value for fixed device %s: %s",
+                        self._name,
+                        err,
+                    )
+            self._current_power = self.power_max
+            _LOGGER.debug(
+                "Set current_power to %s W for fixed device %s because its measured sensor is unavailable",
+                self._current_power,
+                self._name,
             )
             return
 
@@ -834,7 +865,7 @@ class ManagedDevice:
 
     @property
     def measured_power_entity_id(self) -> str | None:
-        """The sensor measuring the real consumption of the device (display only)"""
+        """The sensor measuring the real consumption of a fixed device."""
         return self._measured_power_entity_id
 
     @property
