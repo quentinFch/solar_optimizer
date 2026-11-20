@@ -212,8 +212,9 @@ class SimulatedAnnealingAlgorithm:
         """
 
         puissance_totale_eqt = self.consommation_equipements(solution)
+        puissance_totale_estimee = self.consommation_equipements_estimee(solution)
         diff_puissance_totale_eqt = (
-            puissance_totale_eqt - self._puissance_totale_eqt_initiale
+            puissance_totale_estimee - self._puissance_totale_eqt_initiale
         )
 
         new_consommation_net = self._consommation_net + diff_puissance_totale_eqt
@@ -252,7 +253,7 @@ class SimulatedAnnealingAlgorithm:
 
     def generer_solution_initiale(self, solution):
         """Generate the initial solution (which is the solution given in argument) and calculate the total initial power"""
-        self._puissance_totale_eqt_initiale = self.consommation_equipements(solution)
+        self._puissance_totale_eqt_initiale = self.consommation_equipements_estimee(solution)
         return copy.deepcopy(solution)
 
     def consommation_equipements(self, solution):
@@ -261,6 +262,13 @@ class SimulatedAnnealingAlgorithm:
             equipement["requested_power"]
             for _, equipement in enumerate(solution)
             if equipement["state"]
+        )
+
+    def consommation_equipements_estimee(self, solution):
+        """Estimate consumption without crediting power freed by disabled devices."""
+        return sum(
+            equipement["requested_power"] if equipement["state"] else equipement["current_power"]
+            for equipement in solution
         )
 
     def calculer_new_power(

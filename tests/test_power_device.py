@@ -9,6 +9,64 @@ from homeassistant.components.select import DOMAIN as SELECT_DOMAIN
 
 from .commons import *  # pylint: disable=wildcard-import, unused-wildcard-import
 from custom_components.solar_optimizer.managed_device import ACTION_ACTIVATE, ACTION_DEACTIVATE, ACTION_CHANGE_POWER
+from custom_components.solar_optimizer.simulated_annealing_algo import SimulatedAnnealingAlgorithm
+
+
+@pytest.mark.parametrize(
+    ("current_power", "can_change_power"),
+    [(2400, False), (500, True)],
+)
+def test_disabling_device_does_not_assume_power_is_freed(
+    current_power, can_change_power
+):
+    """A simulated switch-off must not create artificial surplus from its power."""
+    algo = SimulatedAnnealingAlgorithm(1000, 0.05, 0.95, 10)
+    algo._consommation_net = 1500
+    algo._production_solaire = 8
+    algo._cout_achat = 1
+    algo._cout_revente = 1
+    algo._taxe_revente = 0
+    algo._priority_weight = 0
+
+    active_device = {
+        "current_power": current_power,
+        "requested_power": current_power,
+        "state": True,
+        "priority": 0,
+        "can_change_power": can_change_power,
+    }
+    initial_solution = algo.generer_solution_initiale([active_device])
+    switched_off_solution = [
+        {**active_device, "requested_power": 0, "state": False}
+    ]
+
+    assert algo.calculer_objectif(switched_off_solution) == algo.calculer_objectif(
+        initial_solution
+    )
+    assert algo.consommation_equipements(switched_off_solution) == 0
+
+
+def test_fixed_device_activation_uses_nominal_power():
+    """An off fixed-power device is activated using its configured nominal power."""
+    algo = SimulatedAnnealingAlgorithm(1000, 0.05, 0.95, 10)
+    activation = algo.permuter_equipement(
+        [
+            {
+                "current_power": 0,
+                "requested_power": 0,
+                "state": False,
+                "priority": 0,
+                "can_change_power": False,
+                "is_usable": True,
+                "is_waiting": False,
+                "power_max": 2400,
+                "power_min": -1,
+                "power_step": 0,
+            }
+        ]
+    )
+    assert activation[0]["state"] is True
+    assert activation[0]["requested_power"] == 2400
 
 
 @pytest.mark.parametrize("offpeak_power, expected_power", [(600, 600), ("{{ 600 }}", 600), (None, 1000)])
